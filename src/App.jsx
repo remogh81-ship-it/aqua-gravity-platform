@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { evaluateWaterSample } from './api';
-import { Droplet, Activity, FlaskConical, ShieldCheck, AlertTriangle, Printer, ArrowRight, Upload, Download, X, PlusCircle } from 'lucide-react';
+import { Droplet, Activity, FlaskConical, ShieldCheck, AlertTriangle, Printer, ArrowRight, Upload, Download, X, PlusCircle, Radar } from 'lucide-react';
 
 function App() {
   const [language, setLanguage] = useState('ar');
@@ -11,10 +11,9 @@ function App() {
     tds: 0.0, total_hardness: 0.0, calcium_hardness: 0.0, total_alkalinity: 0.0,
     iron: 0.0, manganese: 0.0, nitrate: 0.0, nitrite: 0.0,
     sulfate: 0.0, chloride: 0.0, fluoride: 0.0, aluminum: 0.0, lead: 0.0,
-    free_chlorine: 0.0, total_coliform: 0.0, e_coli: 0.0
+    free_chlorine: 0.0, total_coliform: 0.0, e_coli: 0.0, sodium: 0.0, potassium: 0.0
   };
 
-  // Initially active fields (the most common ones)
   const initialActive = ['flow_rate', 'temperature', 'turbidity', 'ph', 'tds', 'total_hardness', 'iron', 'free_chlorine'];
   
   const [activeFields, setActiveFields] = useState(initialActive);
@@ -38,19 +37,17 @@ function App() {
       setActiveFields([...activeFields, field]);
       setFormData({ ...formData, [field]: safeDefaults[field] });
     }
-    e.target.value = ""; // reset select
+    e.target.value = ""; 
   };
 
   const removeField = (fieldToRemove) => {
     setActiveFields(activeFields.filter(f => f !== fieldToRemove));
-    // Optional: We keep it in formData in case they add it back, but it won't be sent.
   };
 
   const runAnalysis = async () => {
     setLoading(true);
     setError(null);
     
-    // Construct payload: start with safe defaults, override with ONLY active fields
     const payload = { ...safeDefaults };
     activeFields.forEach(field => {
       payload[field] = formData[field] !== undefined ? formData[field] : safeDefaults[field];
@@ -103,7 +100,9 @@ function App() {
       lead: ['lead', 'pb', 'رصاص'],
       free_chlorine: ['free chlor', 'كلور حر', 'متبق'],
       total_coliform: ['coliform', 'قولون'],
-      e_coli: ['coli', 'إي كولاي', 'كولاي']
+      e_coli: ['coli', 'إي كولاي', 'كولاي'],
+      sodium: ['sodium', 'na', 'صوديوم'],
+      potassium: ['potassium', 'k', 'بوتاسيوم']
     };
 
     let extractedData = {};
@@ -173,27 +172,24 @@ function App() {
 
         if (result.success) {
           const foundKeys = Object.keys(result.data);
-          // Automatically add found fields to active list
           setActiveFields(prev => Array.from(new Set([...prev, ...foundKeys])));
           setFormData(prev => ({ ...prev, ...result.data }));
           
-          alert(language === 'ar' ? `نجاح! تم التعرف على ${foundKeys.length} عنصراً وإضافتهم للقائمة.` : `Success! Recognized ${foundKeys.length} parameters.`);
+          alert(language === 'ar' ? `نجاح! تم التعرف على ${foundKeys.length} عنصراً.` : `Success! Recognized ${foundKeys.length} parameters.`);
         } else {
-          alert(language === 'ar' ? 'لم يتم العثور على بيانات كيميائية قابلة للقراءة في هذا الملف.' : 'No readable chemical data found in this file.');
+          alert(language === 'ar' ? 'لم يتم العثور على بيانات قابلة للقراءة.' : 'No readable data found.');
         }
       } catch (err) {
-        alert(language === 'ar' ? 'حدث خطأ غير متوقع أثناء قراءة الملف.' : 'Error reading file.');
+        alert(language === 'ar' ? 'حدث خطأ أثناء قراءة الملف.' : 'Error reading file.');
       }
     };
     
     reader.readAsText(file);
-    e.target.value = null; // Reset input
+    e.target.value = null; 
   };
 
   const isAr = language === 'ar';
   const dir = isAr ? 'rtl' : 'ltr';
-
-  // Get list of fields not currently active for the dropdown
   const availableFieldsToAdd = Object.keys(safeDefaults).filter(k => !activeFields.includes(k));
 
   return (
@@ -235,15 +231,14 @@ function App() {
         <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-md border-t-4 border-blue-600 print:mb-6 print:shadow-none print:border-gray-300 print:border">
           <div className="flex justify-between items-center mb-6 print:hidden">
             <h2 className="text-xl font-bold flex items-center gap-2 print:text-black">
-              <FlaskConical className="text-blue-600"/> {isAr ? 'قائمة التحاليل المتوفرة' : 'Available Test Data'}
+              <FlaskConical className="text-blue-600"/> {isAr ? 'البيانات المخبرية' : 'Lab Data'}
             </h2>
           </div>
 
-          {/* AI/Fuzzy CSV Importer */}
           <div className="flex flex-col gap-2 mb-6 p-4 bg-slate-50 border rounded-lg print:hidden">
             <div className="flex gap-2">
               <label className="flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer py-2 rounded flex justify-center items-center gap-1 text-sm transition-colors shadow-sm">
-                <Upload size={16} /> {isAr ? 'الاستيراد الذكي للنتائج (ملف)' : 'Smart File Upload'}
+                <Upload size={16} /> {isAr ? 'الاستيراد الذكي للنتائج' : 'Smart Upload'}
                 <input type="file" accept=".csv, .txt, .tsv" className="hidden" onChange={handleFileUpload} />
               </label>
               <button onClick={downloadTemplate} title={isAr ? "تحميل نموذج فارغ" : "Download Template"} className="bg-white border border-blue-600 text-blue-700 hover:bg-blue-50 px-3 py-2 rounded flex justify-center items-center transition-colors">
@@ -252,7 +247,6 @@ function App() {
             </div>
           </div>
 
-          {/* Dynamic Grid */}
           <div className="grid grid-cols-2 gap-4 print:grid-cols-4 print:gap-2">
             {activeFields.map((key) => (
               <div key={key} className="flex flex-col relative group">
@@ -279,12 +273,11 @@ function App() {
             ))}
           </div>
 
-          {/* Add New Parameter Dropdown */}
           {availableFieldsToAdd.length > 0 && (
             <div className="mt-4 print:hidden border-t pt-4 border-dashed border-slate-200">
               <label className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-1">
                 <PlusCircle size={14} className="text-emerald-600"/> 
-                {isAr ? 'إضافة عنصر جديد للقائمة:' : 'Add missing parameter:'}
+                {isAr ? 'إضافة عنصر جديد:' : 'Add parameter:'}
               </label>
               <select 
                 className="w-full p-2 border rounded bg-slate-50 text-sm outline-none cursor-pointer"
@@ -305,7 +298,7 @@ function App() {
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors flex justify-center items-center gap-2 mt-6 print:hidden shadow-md"
           >
             {loading ? <Activity className="animate-spin" /> : <ShieldCheck />}
-            {isAr ? 'تحليل هندسي شامل' : 'Run Full Engineering Analysis'}
+            {isAr ? 'تحليل هندسي شامل' : 'Run Full Analysis'}
           </button>
           
           {error && <div className="mt-4 p-4 bg-red-100 text-red-700 rounded-lg print:hidden text-sm">{error}</div>}
@@ -320,6 +313,19 @@ function App() {
             </div>
           ) : (
             <>
+              {/* Intelligent Water Classification Banner */}
+              <div className="bg-indigo-900 text-white p-6 rounded-xl shadow-md flex items-center gap-4 print:bg-white print:text-black print:border-2 print:border-indigo-900 print:shadow-none">
+                <div className="bg-indigo-700 p-3 rounded-full print:hidden">
+                  <Radar className="w-8 h-8 text-indigo-200" />
+                </div>
+                <div>
+                  <h3 className="text-indigo-200 text-sm font-bold uppercase tracking-wider mb-1 print:text-slate-500">
+                    {isAr ? 'البصمة الكيميائية (تصنيف مصدر المياه)' : 'Chemical Fingerprint (Water Source)'}
+                  </h3>
+                  <div className="text-2xl font-black">{results.water_type}</div>
+                </div>
+              </div>
+
               {/* Compliance & WQI */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 print:grid-cols-2 print:gap-4">
                 <div className={`p-6 rounded-xl shadow-md text-white print:text-black print:border print:border-gray-300 print:shadow-none ${results.compliance.is_compliant ? 'bg-emerald-600' : 'bg-red-600 print:bg-white'}`}>

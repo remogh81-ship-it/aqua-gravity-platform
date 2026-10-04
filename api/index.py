@@ -27,6 +27,8 @@ class WaterSampleInput(BaseModel):
     free_chlorine: float
     total_coliform: float
     e_coli: float
+    sodium: float
+    potassium: float
 
 class ComplianceResult(BaseModel):
     is_compliant: bool
@@ -60,6 +62,7 @@ class AssessmentOutput(BaseModel):
     stability: StabilityResult
     dosage: DosageResult
     treatment_train: TreatmentResult
+    water_type: str
 
 # ----------------- STANDARDS (Decree 458/2007) -----------------
 DECREE_458 = {
@@ -68,7 +71,7 @@ DECREE_458 = {
     "iron": 0.3, "manganese": 0.4, "nitrate": 45.0, "nitrite": 0.2,
     "sulfate": 250.0, "chloride": 250.0, "fluoride": 0.8, "aluminum": 0.2, "lead": 0.01,
     "free_chlorine_min": 0.5, "free_chlorine_max": 1.5,
-    "total_coliform": 0.0, "e_coli": 0.0
+    "total_coliform": 0.0, "e_coli": 0.0, "sodium": 200.0
 }
 
 # ----------------- LOGIC -----------------
@@ -90,6 +93,7 @@ def verify_compliance(s: WaterSampleInput) -> ComplianceResult:
     if s.fluoride > DECREE_458["fluoride"]: v.append(f"Fluoride > {DECREE_458['fluoride']} mg/L")
     if s.aluminum > DECREE_458["aluminum"]: v.append(f"Aluminum > {DECREE_458['aluminum']} mg/L")
     if s.lead > DECREE_458["lead"]: v.append(f"Lead > {DECREE_458['lead']} mg/L (TOXIC)")
+    if s.sodium > DECREE_458["sodium"]: v.append(f"Sodium > {DECREE_458['sodium']} mg/L")
     if not (DECREE_458["free_chlorine_min"] <= s.free_chlorine <= DECREE_458["free_chlorine_max"]): v.append("Free Chlorine out of bounds (0.5-1.5 mg/L)")
     
     if s.total_coliform > DECREE_458["total_coliform"]:
@@ -102,7 +106,6 @@ def verify_compliance(s: WaterSampleInput) -> ComplianceResult:
     return ComplianceResult(is_compliant=len(v)==0, veto_status="REJECTED" if veto else "PASS", violations=v)
 
 def calculate_wqi(s: WaterSampleInput) -> WQIResult:
-    # Selected key parameters for WQI standard calculation
     params = {
         "turbidity": (s.turbidity, DECREE_458["turbidity"]),
         "ph": (s.ph, DECREE_458["ph_max"]),
@@ -113,7 +116,8 @@ def calculate_wqi(s: WaterSampleInput) -> WQIResult:
         "sulfate": (s.sulfate, DECREE_458["sulfate"]),
         "chloride": (s.chloride, DECREE_458["chloride"]),
         "fluoride": (s.fluoride, DECREE_458["fluoride"]),
-        "lead": (s.lead, DECREE_458["lead"])
+        "lead": (s.lead, DECREE_458["lead"]),
+        "sodium": (s.sodium, DECREE_458["sodium"])
     }
     K = 1.0 / sum(1.0 / p[1] for p in params.values() if p[1] > 0)
     subs = {}
@@ -172,11 +176,36 @@ def get_train(s: WaterSampleInput, c: ComplianceResult, st: StabilityResult) -> 
     if s.iron > 0.1 or s.manganese > 0.1 or s.turbidity > 5.0: stages.append("Pre-oxidation (Aeration / KMnO4)")
     if s.turbidity > 1.0 or s.aluminum > 0.1: stages.append("Coagulation & Flocculation")
     stages.append("Clarification & Sand Filtration")
-    if s.calcium_hardness > 350 or s.tds > 1000 or s.chloride > 250 or s.sulfate > 250: stages.append("Membrane Filtration (RO)")
+    if s.calcium_hardness > 350 or s.tds > 1000 or s.chloride > 250 or s.sulfate > 250 or s.sodium > 200: stages.append("Membrane Filtration (RO)")
     if s.lead > 0.01: stages.append("GAC / Specialized Media Adsorption")
     if st.lsi < -0.5: stages.append("Chemical Conditioning (pH Adjustment)")
     stages.append("Terminal Disinfection (Chlorine)")
     return TreatmentResult(stages=stages)
+
+def classify_water_source(s: WaterSampleInput) -> str:
+    # Heuristic Engine for Water Type Fingerprinting
+    if s.tds > 30000:
+        return "Sea Water (مياه بحر)"
+    if 1500 < s.tds <= 30000:
+        return "Brackish Water (مياه شبه مالحة / مسوس)"
+    
+    # Heavy pollution / Industrial
+    if s.lead > 0.05 or s.aluminum > 2.0 or s.ph < 5.0 or s.ph > 9.5:
+        return "Industrial Wastewater (مياه صرف صناعي)"
+    
+    # Biological pollution / Domestic
+    if s.e_coli > 1000 or s.total_coliform > 10000 or s.turbidity > 20:
+        return "Domestic Wastewater (مياه صرف صحي)"
+        
+    # Treated vs Untreated Fresh Water
+    if s.free_chlorine >= 0.1 and s.tds <= 1500 and s.e_coli == 0:
+        return "Treated Drinking Water (مياه شرب معالجة)"
+        
+    # Groundwater characteristics
+    if s.total_hardness > 250 and s.turbidity < 5.0 and s.free_chlorine == 0:
+        return "Groundwater (مياه جوفية)"
+        
+    return "Untreated Surface Water (مياه سطحية عذبة غير معالجة)"
 
 # ----------------- ENDPOINTS -----------------
 @app.post("/api/v1/assess", response_model=AssessmentOutput)
@@ -186,4 +215,5 @@ def assess_water(sample: WaterSampleInput):
     st = get_stability(sample)
     d = calc_dosage(sample, st)
     t = get_train(sample, c, st)
-    return AssessmentOutput(compliance=c, wqi=w, stability=st, dosage=d, treatment_train=t)
+    water_type = classify_water_source(sample)
+    return AssessmentOutput(compliance=c, wqi=w, stability=st, dosage=d, treatment_train=t, water_type=water_type)
