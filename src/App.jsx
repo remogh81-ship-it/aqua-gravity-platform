@@ -28,12 +28,22 @@ function App() {
   const [error, setError] = useState(null);
 
   const formatLabel = (key) => {
-    if (key === 'ph') return 'pH';
-    if (key === 'tds') return 'TDS';
-    if (key === 'bod') return 'BOD';
-    if (key === 'cod') return 'COD';
-    if (key === 'e_coli') return 'E. Coli';
-    return key.replace(/_/g, ' ');
+    const specialCases = {
+      'ph': 'pH',
+      'tds': 'TDS',
+      'bod': 'BOD',
+      'cod': 'COD',
+      'e_coli': 'E. Coli',
+      'phosphorous': 'Phosphorus'
+    };
+    
+    if (specialCases[key]) return specialCases[key];
+    
+    // Capitalize the first letter of each word
+    return key
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
   };
 
   const handleInputChange = (e) => {
@@ -213,7 +223,7 @@ function App() {
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Droplet className="w-8 h-8 text-blue-300" />
-            <h1 className="text-2xl font-bold">AquaGravity | Engineering <span className="text-sm font-normal text-blue-300 ml-2">v2.1</span></h1>
+            <h1 className="text-2xl font-bold">AquaGravity | Engineering <span className="text-sm font-normal text-blue-300 ml-2">v2.2</span></h1>
           </div>
           <div className="flex gap-4">
             <select 
