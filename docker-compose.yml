@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # محرك الحسابات ومعايير المياه (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aqua_gravity_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+    networks:
+      - aqua_network
+
+  # واجهة المستخدم التفاعلية سداسية اللغات (React + Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aqua_gravity_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - aqua_network
+
+networks:
+  aqua_network:
+    driver: bridge
