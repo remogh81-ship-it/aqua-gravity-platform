@@ -11,20 +11,30 @@ function App() {
     tds: 0.0, total_hardness: 0.0, calcium_hardness: 0.0, total_alkalinity: 0.0,
     iron: 0.0, manganese: 0.0, nitrate: 0.0, nitrite: 0.0,
     sulfate: 0.0, chloride: 0.0, fluoride: 0.0, aluminum: 0.0, lead: 0.0,
-    free_chlorine: 0.0, total_coliform: 0.0, e_coli: 0.0, sodium: 0.0, potassium: 0.0
+    free_chlorine: 0.0, total_coliform: 0.0, e_coli: 0.0, sodium: 0.0, potassium: 0.0,
+    ammonia: 0.0, phosphorous: 0.0, bod: 0.0, cod: 0.0
   };
 
-  const initialActive = ['flow_rate', 'temperature', 'turbidity', 'ph', 'tds', 'total_hardness', 'iron', 'free_chlorine'];
+  const initialActive = ['flow_rate', 'temperature', 'turbidity', 'ph', 'tds', 'total_hardness', 'iron', 'free_chlorine', 'ammonia'];
   
   const [activeFields, setActiveFields] = useState(initialActive);
   const [formData, setFormData] = useState({
     flow_rate: 25000, temperature: 22, turbidity: 0.8, ph: 7.2,
-    tds: 420, total_hardness: 180, iron: 0.1, free_chlorine: 1.0
+    tds: 420, total_hardness: 180, iron: 0.1, free_chlorine: 1.0, ammonia: 0.0
   });
   
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const formatLabel = (key) => {
+    if (key === 'ph') return 'pH';
+    if (key === 'tds') return 'TDS';
+    if (key === 'bod') return 'BOD';
+    if (key === 'cod') return 'COD';
+    if (key === 'e_coli') return 'E. Coli';
+    return key.replace(/_/g, ' ');
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -102,7 +112,11 @@ function App() {
       total_coliform: ['coliform', 'قولون'],
       e_coli: ['coli', 'إي كولاي', 'كولاي'],
       sodium: ['sodium', 'na', 'صوديوم'],
-      potassium: ['potassium', 'k', 'بوتاسيوم']
+      potassium: ['potassium', 'k', 'بوتاسيوم'],
+      ammonia: ['ammonia', 'nh3', 'nh4', 'أمونيا', 'نشادر'],
+      phosphorous: ['phosphor', 'po4', 'p', 'فسفور', 'فوسفات'],
+      bod: ['bod', 'b.o.d', 'حيوي'],
+      cod: ['cod', 'c.o.d', 'كيميائي']
     };
 
     let extractedData = {};
@@ -199,7 +213,7 @@ function App() {
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Droplet className="w-8 h-8 text-blue-300" />
-            <h1 className="text-2xl font-bold">AquaGravity | Engineering <span className="text-sm font-normal text-blue-300 ml-2">v2.0</span></h1>
+            <h1 className="text-2xl font-bold">AquaGravity | Engineering <span className="text-sm font-normal text-blue-300 ml-2">v2.1</span></h1>
           </div>
           <div className="flex gap-4">
             <select 
@@ -251,7 +265,7 @@ function App() {
             {activeFields.map((key) => (
               <div key={key} className="flex flex-col relative group">
                 <label className="text-xs font-bold text-slate-500 mb-1 capitalize flex justify-between items-center">
-                  <span className="truncate" title={key.replace(/_/g, ' ')}>{key.replace(/_/g, ' ')}</span>
+                  <span className="truncate" title={formatLabel(key)}>{formatLabel(key)}</span>
                   <button 
                     onClick={() => removeField(key)}
                     className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity print:hidden"
@@ -286,7 +300,7 @@ function App() {
               >
                 <option value="" disabled>{isAr ? '-- اختر العنصر --' : '-- Select Parameter --'}</option>
                 {availableFieldsToAdd.map(field => (
-                  <option key={field} value={field}>{field.replace(/_/g, ' ')}</option>
+                  <option key={field} value={field}>{formatLabel(field)}</option>
                 ))}
               </select>
             </div>
