@@ -199,7 +199,7 @@ function App() {
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Droplet className="w-8 h-8 text-blue-300" />
-            <h1 className="text-2xl font-bold">AquaGravity | Engineering</h1>
+            <h1 className="text-2xl font-bold">AquaGravity | Engineering <span className="text-sm font-normal text-blue-300 ml-2">v2.0</span></h1>
           </div>
           <div className="flex gap-4">
             <select 
