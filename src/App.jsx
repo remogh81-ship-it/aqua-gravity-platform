@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { evaluateWaterSample } from './api';
-import { Droplet, Activity, FlaskConical, ShieldCheck, AlertTriangle, Printer, ArrowRight } from 'lucide-react';
+import { Droplet, Activity, FlaskConical, ShieldCheck, AlertTriangle, Printer, ArrowRight, Upload, Download } from 'lucide-react';
 
 function App() {
   const [language, setLanguage] = useState('ar');
@@ -36,6 +36,56 @@ function App() {
     }
   };
 
+  const downloadTemplate = () => {
+    const headers = Object.keys(formData).join(',');
+    const values = Object.values(formData).join(',');
+    const csvContent = "data:text/csv;charset=utf-8," + headers + "\n" + values;
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "AquaGravity_Lab_Template.csv");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target.result;
+        const lines = text.split('\n').filter(line => line.trim() !== '');
+        if (lines.length >= 2) {
+          const headers = lines[0].split(',').map(h => h.trim());
+          const values = lines[1].split(',').map(v => parseFloat(v.trim()) || 0);
+          
+          const newFormData = { ...formData };
+          let isValid = false;
+
+          headers.forEach((header, index) => {
+            if (newFormData[header] !== undefined) {
+              newFormData[header] = values[index];
+              isValid = true;
+            }
+          });
+
+          if (isValid) {
+            setFormData(newFormData);
+            alert(language === 'ar' ? 'تم استيراد البيانات بنجاح!' : 'Data imported successfully!');
+          } else {
+            alert(language === 'ar' ? 'الملف غير مطابق للنموذج.' : 'Invalid file format.');
+          }
+        }
+      } catch (err) {
+        alert(language === 'ar' ? 'حدث خطأ أثناء قراءة الملف.' : 'Error reading file.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null; // Reset input
+  };
+
   const isAr = language === 'ar';
   const dir = isAr ? 'rtl' : 'ltr';
 
@@ -62,7 +112,7 @@ function App() {
               <option value="en">English (EN)</option>
             </select>
             {results && (
-              <button onClick={printPDF} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded flex gap-2 items-center">
+              <button onClick={printPDF} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded flex gap-2 items-center transition-colors">
                 <Printer size={18} /> {isAr ? 'تصدير PDF' : 'Export PDF'}
               </button>
             )}
@@ -80,9 +130,29 @@ function App() {
         
         {/* Left Column: Inputs */}
         <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-md border-t-4 border-blue-600 print:mb-6 print:shadow-none print:border-gray-300 print:border">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2 print:text-black">
-            <FlaskConical className="text-blue-600 print:hidden"/> {isAr ? 'المدخلات الكيميائية والبيولوجية' : 'Chemical & Biological Inputs'}
-          </h2>
+          <div className="flex justify-between items-center mb-6 print:hidden">
+            <h2 className="text-xl font-bold flex items-center gap-2 print:text-black">
+              <FlaskConical className="text-blue-600"/> {isAr ? 'البيانات المخبرية' : 'Lab Data'}
+            </h2>
+          </div>
+
+          {/* Excel/CSV Import/Export Tools (Hidden on Print) */}
+          <div className="flex flex-col gap-2 mb-6 p-4 bg-slate-50 border rounded-lg print:hidden">
+            <span className="text-sm font-bold text-slate-600">{isAr ? 'الاستيراد الآلي (Excel / CSV)' : 'Automated Import'}</span>
+            <div className="flex gap-2">
+              <button onClick={downloadTemplate} className="flex-1 bg-white border border-blue-600 text-blue-700 hover:bg-blue-50 py-2 rounded flex justify-center items-center gap-1 text-sm transition-colors">
+                <Download size={16} /> {isAr ? 'تحميل النموذج' : 'Template'}
+              </button>
+              <label className="flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer py-2 rounded flex justify-center items-center gap-1 text-sm transition-colors">
+                <Upload size={16} /> {isAr ? 'رفع النتائج' : 'Upload CSV'}
+                <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+              </label>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              {isAr ? 'حمل النموذج، املأه في الإكسيل، ثم احفظه كـ CSV وارفعه هنا.' : 'Download template, fill in Excel, save as CSV, and upload.'}
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 print:grid-cols-4">
             {Object.keys(formData).map((key) => (
               <div key={key} className="flex flex-col">
@@ -103,7 +173,7 @@ function App() {
           <button 
             onClick={runAnalysis}
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors flex justify-center items-center gap-2 mt-6 print:hidden"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors flex justify-center items-center gap-2 mt-6 print:hidden shadow-md"
           >
             {loading ? <Activity className="animate-spin" /> : <ShieldCheck />}
             {isAr ? 'تحليل هندسي شامل' : 'Run Full Engineering Analysis'}
@@ -125,7 +195,7 @@ function App() {
                 <div className={`p-6 rounded-xl shadow-md text-white print:text-black print:border print:border-gray-300 print:shadow-none ${results.compliance.is_compliant ? 'bg-emerald-600' : 'bg-red-600 print:bg-white'}`}>
                   <h3 className="text-lg font-bold mb-2 opacity-90">{isAr ? 'الامتثال التنظيمي' : 'Regulatory Compliance'}</h3>
                   <div className="text-3xl font-black mb-4">
-                    {results.compliance.is_compliant ? (isAr ? 'مطابق' : 'Compliant') : (isAr ? 'غير مطابق' : 'Non-Compliant')}
+                    {results.compliance.is_compliant ? (isAr ? 'مطابق لقرار 458' : 'Compliant') : (isAr ? 'غير مطابق' : 'Non-Compliant')}
                   </div>
                   {!results.compliance.is_compliant && (
                     <ul className="list-disc list-inside text-sm bg-black/20 p-3 rounded print:bg-transparent print:text-red-700">
@@ -162,7 +232,7 @@ function App() {
                   <div className="space-y-3">
                     <div className="flex justify-between border-b pb-2">
                       <span className="text-slate-500">Reagent:</span>
-                      <span className="font-bold text-amber-700">{results.dosage.reagent}</span>
+                      <span className="font-bold text-amber-700 truncate ml-2" title={results.dosage.reagent}>{results.dosage.reagent}</span>
                     </div>
                     <div className="flex justify-between border-b pb-2">
                       <span className="text-slate-500">Dose (mg/L):</span>
@@ -178,7 +248,7 @@ function App() {
 
               {/* Treatment Train PFD (Process Flow Diagram) */}
               <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-slate-800 print:shadow-none print:border print:border-gray-300 print:mt-4">
-                <h3 className="text-lg font-bold text-slate-700 mb-6">{isAr ? 'مخطط سير المعالجة (PFD)' : 'Process Flow Diagram (PFD)'}</h3>
+                <h3 className="text-lg font-bold text-slate-700 mb-6">{isAr ? 'مخطط سير المعالجة المقترح (PFD)' : 'Process Flow Diagram (PFD)'}</h3>
                 <div className="flex flex-wrap items-center justify-center gap-4">
                   {results.treatment_train.stages.map((stage, i) => (
                     <React.Fragment key={i}>
