@@ -1,15 +1,26 @@
 import React, { useState } from 'react';
 import { evaluateWaterSample } from './api';
-import { Droplet, Activity, FlaskConical, ShieldCheck, AlertTriangle, Printer, ArrowRight, Upload, Download } from 'lucide-react';
+import { Droplet, Activity, FlaskConical, ShieldCheck, AlertTriangle, Printer, ArrowRight, Upload, Download, X, PlusCircle } from 'lucide-react';
 
 function App() {
   const [language, setLanguage] = useState('ar');
+  
+  // Safe defaults for parameters not provided by the lab (0 for most, 7 for pH, 25 for temp)
+  const safeDefaults = {
+    flow_rate: 25000, temperature: 25, turbidity: 0.0, ph: 7.0,
+    tds: 0.0, total_hardness: 0.0, calcium_hardness: 0.0, total_alkalinity: 0.0,
+    iron: 0.0, manganese: 0.0, nitrate: 0.0, nitrite: 0.0,
+    sulfate: 0.0, chloride: 0.0, fluoride: 0.0, aluminum: 0.0, lead: 0.0,
+    free_chlorine: 0.0, total_coliform: 0.0, e_coli: 0.0
+  };
+
+  // Initially active fields (the most common ones)
+  const initialActive = ['flow_rate', 'temperature', 'turbidity', 'ph', 'tds', 'total_hardness', 'iron', 'free_chlorine'];
+  
+  const [activeFields, setActiveFields] = useState(initialActive);
   const [formData, setFormData] = useState({
     flow_rate: 25000, temperature: 22, turbidity: 0.8, ph: 7.2,
-    tds: 420, total_hardness: 180, calcium_hardness: 120, total_alkalinity: 95,
-    iron: 0.1, manganese: 0.05, nitrate: 10.0, nitrite: 0.0,
-    sulfate: 150, chloride: 200, fluoride: 0.5, aluminum: 0.05, lead: 0.0,
-    free_chlorine: 1.0, total_coliform: 0, e_coli: 0
+    tds: 420, total_hardness: 180, iron: 0.1, free_chlorine: 1.0
   });
   
   const [results, setResults] = useState(null);
@@ -21,11 +32,32 @@ function App() {
     setFormData({ ...formData, [name]: parseFloat(value) || 0 });
   };
 
+  const addField = (e) => {
+    const field = e.target.value;
+    if (field && !activeFields.includes(field)) {
+      setActiveFields([...activeFields, field]);
+      setFormData({ ...formData, [field]: safeDefaults[field] });
+    }
+    e.target.value = ""; // reset select
+  };
+
+  const removeField = (fieldToRemove) => {
+    setActiveFields(activeFields.filter(f => f !== fieldToRemove));
+    // Optional: We keep it in formData in case they add it back, but it won't be sent.
+  };
+
   const runAnalysis = async () => {
     setLoading(true);
     setError(null);
+    
+    // Construct payload: start with safe defaults, override with ONLY active fields
+    const payload = { ...safeDefaults };
+    activeFields.forEach(field => {
+      payload[field] = formData[field] !== undefined ? formData[field] : safeDefaults[field];
+    });
+
     try {
-      const data = await evaluateWaterSample(formData);
+      const data = await evaluateWaterSample(payload);
       setResults(data);
     } catch (err) {
       setError(language === 'ar' 
@@ -37,23 +69,20 @@ function App() {
   };
 
   const downloadTemplate = () => {
-    const headers = Object.keys(formData).join(',');
-    const values = Object.values(formData).join(',');
-    const csvContent = "data:text/csv;charset=utf-8," + headers + "\n" + values;
+    const headers = Object.keys(safeDefaults).join(',');
+    const csvContent = "data:text/csv;charset=utf-8," + headers + "\n";
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "AquaGravity_Lab_Template.csv");
+    link.setAttribute("download", "AquaGravity_Full_Template.csv");
     document.body.appendChild(link);
     link.click();
     link.remove();
   };
 
-  // Smart Fuzzy Parser to handle ANY layout (Horizontal or Vertical) and Arabic/English variations
   const smartParseCSV = (text) => {
     const lines = text.split(/\r?\n/).map(l => l.replace(/"/g, '').toLowerCase());
     
-    // Dictionary of keywords to identify parameters
     const aliases = {
       flow_rate: ['flow', 'تدفق', 'تصرف'],
       temperature: ['temp', 'حرار', 'celsius'],
@@ -80,14 +109,13 @@ function App() {
     let extractedData = {};
     let foundAny = false;
 
-    // Strategy 1: Vertical Layout (Parameter name and value on the same row)
     lines.forEach(line => {
       const numbers = line.match(/[-+]?[0-9]*\.?[0-9]+/g);
       if (numbers && numbers.length > 0) {
         Object.keys(aliases).forEach(key => {
           if (extractedData[key] === undefined) {
             if (aliases[key].some(alias => line.includes(alias))) {
-              extractedData[key] = parseFloat(numbers[numbers.length - 1]); // Pick the last number in the row
+              extractedData[key] = parseFloat(numbers[numbers.length - 1]);
               foundAny = true;
             }
           }
@@ -95,7 +123,6 @@ function App() {
       }
     });
 
-    // Strategy 2: Horizontal Layout (Headers on one row, values on a row below it)
     if (Object.keys(extractedData).length < 3 && lines.length >= 2) {
        let headerRowIdx = -1;
        let headerMap = {};
@@ -145,9 +172,12 @@ function App() {
         const result = smartParseCSV(text);
 
         if (result.success) {
+          const foundKeys = Object.keys(result.data);
+          // Automatically add found fields to active list
+          setActiveFields(prev => Array.from(new Set([...prev, ...foundKeys])));
           setFormData(prev => ({ ...prev, ...result.data }));
-          const matchedCount = Object.keys(result.data).length;
-          alert(language === 'ar' ? `نجاح! تم التعرف على ${matchedCount} عنصراً واستيراد أرقامهم تلقائياً.` : `Success! Recognized ${matchedCount} parameters.`);
+          
+          alert(language === 'ar' ? `نجاح! تم التعرف على ${foundKeys.length} عنصراً وإضافتهم للقائمة.` : `Success! Recognized ${foundKeys.length} parameters.`);
         } else {
           alert(language === 'ar' ? 'لم يتم العثور على بيانات كيميائية قابلة للقراءة في هذا الملف.' : 'No readable chemical data found in this file.');
         }
@@ -163,13 +193,12 @@ function App() {
   const isAr = language === 'ar';
   const dir = isAr ? 'rtl' : 'ltr';
 
-  const printPDF = () => {
-    window.print();
-  };
+  // Get list of fields not currently active for the dropdown
+  const availableFieldsToAdd = Object.keys(safeDefaults).filter(k => !activeFields.includes(k));
 
   return (
     <div dir={dir} className="min-h-screen bg-slate-100 font-sans text-slate-800 print:bg-white print:text-black">
-      {/* Header - Hidden on Print */}
+      {/* Header */}
       <header className="bg-blue-900 text-white p-4 shadow-lg print:hidden">
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -186,7 +215,7 @@ function App() {
               <option value="en">English (EN)</option>
             </select>
             {results && (
-              <button onClick={printPDF} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded flex gap-2 items-center transition-colors">
+              <button onClick={() => window.print()} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded flex gap-2 items-center transition-colors">
                 <Printer size={18} /> {isAr ? 'تصدير PDF' : 'Export PDF'}
               </button>
             )}
@@ -194,7 +223,7 @@ function App() {
         </div>
       </header>
 
-      {/* Print Header - Visible ONLY on Print */}
+      {/* Print Header */}
       <div className="hidden print:block text-center border-b-2 border-gray-800 pb-4 mb-6">
         <h1 className="text-3xl font-bold">AquaGravity Engineering Report</h1>
         <p className="text-gray-500">Decree 458/2007 Compliance & Process Design</p>
@@ -206,41 +235,70 @@ function App() {
         <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-md border-t-4 border-blue-600 print:mb-6 print:shadow-none print:border-gray-300 print:border">
           <div className="flex justify-between items-center mb-6 print:hidden">
             <h2 className="text-xl font-bold flex items-center gap-2 print:text-black">
-              <FlaskConical className="text-blue-600"/> {isAr ? 'البيانات المخبرية' : 'Lab Data'}
+              <FlaskConical className="text-blue-600"/> {isAr ? 'قائمة التحاليل المتوفرة' : 'Available Test Data'}
             </h2>
           </div>
 
-          {/* AI/Fuzzy CSV Importer (Hidden on Print) */}
+          {/* AI/Fuzzy CSV Importer */}
           <div className="flex flex-col gap-2 mb-6 p-4 bg-slate-50 border rounded-lg print:hidden">
-            <span className="text-sm font-bold text-slate-600">{isAr ? 'الاستيراد الذكي للنتائج (Excel / CSV)' : 'Smart Lab Data Importer'}</span>
             <div className="flex gap-2">
               <label className="flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer py-2 rounded flex justify-center items-center gap-1 text-sm transition-colors shadow-sm">
-                <Upload size={16} /> {isAr ? 'رفع ملف النتائج' : 'Upload File'}
+                <Upload size={16} /> {isAr ? 'الاستيراد الذكي للنتائج (ملف)' : 'Smart File Upload'}
                 <input type="file" accept=".csv, .txt, .tsv" className="hidden" onChange={handleFileUpload} />
               </label>
+              <button onClick={downloadTemplate} title={isAr ? "تحميل نموذج فارغ" : "Download Template"} className="bg-white border border-blue-600 text-blue-700 hover:bg-blue-50 px-3 py-2 rounded flex justify-center items-center transition-colors">
+                <Download size={16} />
+              </button>
             </div>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              {isAr ? 'الخوارزمية الذكية ستقرأ الملف العشوائي أفقياً أو رأسياً وتبحث عن أسماء العناصر وتطابقها برمجياً.' : 'Smart algorithm parses horizontal or vertical layouts and auto-maps parameters.'}
-            </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 print:grid-cols-4">
-            {Object.keys(formData).map((key) => (
-              <div key={key} className="flex flex-col">
-                <label className="text-xs font-bold text-slate-500 mb-1 capitalize truncate" title={key.replace(/_/g, ' ')}>
-                  {key.replace(/_/g, ' ')}
+          {/* Dynamic Grid */}
+          <div className="grid grid-cols-2 gap-4 print:grid-cols-4 print:gap-2">
+            {activeFields.map((key) => (
+              <div key={key} className="flex flex-col relative group">
+                <label className="text-xs font-bold text-slate-500 mb-1 capitalize flex justify-between items-center">
+                  <span className="truncate" title={key.replace(/_/g, ' ')}>{key.replace(/_/g, ' ')}</span>
+                  <button 
+                    onClick={() => removeField(key)}
+                    className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity print:hidden"
+                    title={isAr ? "حذف العنصر" : "Remove"}
+                  >
+                    <X size={14} />
+                  </button>
                 </label>
                 <input 
                   type="number" 
                   name={key} 
-                  value={formData[key]} 
+                  value={formData[key] || ''} 
                   onChange={handleInputChange}
-                  className="p-1 border rounded bg-slate-50 outline-none text-sm print:border-none print:bg-transparent print:font-bold"
+                  placeholder="0"
+                  className="p-1.5 border border-slate-200 rounded bg-slate-50 hover:border-blue-400 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-all print:border-none print:bg-transparent print:font-bold print:p-0"
                   step="any"
                 />
               </div>
             ))}
           </div>
+
+          {/* Add New Parameter Dropdown */}
+          {availableFieldsToAdd.length > 0 && (
+            <div className="mt-4 print:hidden border-t pt-4 border-dashed border-slate-200">
+              <label className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-1">
+                <PlusCircle size={14} className="text-emerald-600"/> 
+                {isAr ? 'إضافة عنصر جديد للقائمة:' : 'Add missing parameter:'}
+              </label>
+              <select 
+                className="w-full p-2 border rounded bg-slate-50 text-sm outline-none cursor-pointer"
+                onChange={addField}
+                defaultValue=""
+              >
+                <option value="" disabled>{isAr ? '-- اختر العنصر --' : '-- Select Parameter --'}</option>
+                {availableFieldsToAdd.map(field => (
+                  <option key={field} value={field}>{field.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button 
             onClick={runAnalysis}
             disabled={loading}
@@ -249,7 +307,8 @@ function App() {
             {loading ? <Activity className="animate-spin" /> : <ShieldCheck />}
             {isAr ? 'تحليل هندسي شامل' : 'Run Full Engineering Analysis'}
           </button>
-          {error && <div className="mt-4 p-4 bg-red-100 text-red-700 rounded-lg print:hidden">{error}</div>}
+          
+          {error && <div className="mt-4 p-4 bg-red-100 text-red-700 rounded-lg print:hidden text-sm">{error}</div>}
         </div>
 
         {/* Right Column: Results Dashboard */}
@@ -317,7 +376,7 @@ function App() {
                 </div>
               </div>
 
-              {/* Treatment Train PFD (Process Flow Diagram) */}
+              {/* Treatment Train PFD */}
               <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-slate-800 print:shadow-none print:border print:border-gray-300 print:mt-4">
                 <h3 className="text-lg font-bold text-slate-700 mb-6">{isAr ? 'مخطط سير المعالجة المقترح (PFD)' : 'Process Flow Diagram (PFD)'}</h3>
                 <div className="flex flex-wrap items-center justify-center gap-4">
