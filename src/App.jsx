@@ -49,39 +49,113 @@ function App() {
     link.remove();
   };
 
+  // Smart Fuzzy Parser to handle ANY layout (Horizontal or Vertical) and Arabic/English variations
+  const smartParseCSV = (text) => {
+    const lines = text.split(/\r?\n/).map(l => l.replace(/"/g, '').toLowerCase());
+    
+    // Dictionary of keywords to identify parameters
+    const aliases = {
+      flow_rate: ['flow', 'تدفق', 'تصرف'],
+      temperature: ['temp', 'حرار', 'celsius'],
+      turbidity: ['turb', 'عكار', 'ntu'],
+      ph: ['ph', 'أس', 'هيدروجين'],
+      tds: ['tds', 'صلبة', 'dissolved'],
+      total_hardness: ['total hardness', 'عسر كلي', 'hardness'],
+      calcium_hardness: ['calcium', 'عسر كالسيوم', 'ca'],
+      total_alkalinity: ['alkalin', 'قلوية'],
+      iron: ['iron', 'fe', 'حديد'],
+      manganese: ['mangan', 'mn', 'منجن'],
+      nitrate: ['nitrate', 'no3', 'نترات'],
+      nitrite: ['nitrite', 'no2', 'نتريت'],
+      sulfate: ['sulfat', 'so4', 'كبريتات'],
+      chloride: ['chlorid', 'cl', 'كلوريد'],
+      fluoride: ['fluorid', 'f', 'فلوريد'],
+      aluminum: ['alumin', 'al', 'ألمن', 'المن'],
+      lead: ['lead', 'pb', 'رصاص'],
+      free_chlorine: ['free chlor', 'كلور حر', 'متبق'],
+      total_coliform: ['coliform', 'قولون'],
+      e_coli: ['coli', 'إي كولاي', 'كولاي']
+    };
+
+    let extractedData = {};
+    let foundAny = false;
+
+    // Strategy 1: Vertical Layout (Parameter name and value on the same row)
+    lines.forEach(line => {
+      const numbers = line.match(/[-+]?[0-9]*\.?[0-9]+/g);
+      if (numbers && numbers.length > 0) {
+        Object.keys(aliases).forEach(key => {
+          if (extractedData[key] === undefined) {
+            if (aliases[key].some(alias => line.includes(alias))) {
+              extractedData[key] = parseFloat(numbers[numbers.length - 1]); // Pick the last number in the row
+              foundAny = true;
+            }
+          }
+        });
+      }
+    });
+
+    // Strategy 2: Horizontal Layout (Headers on one row, values on a row below it)
+    if (Object.keys(extractedData).length < 3 && lines.length >= 2) {
+       let headerRowIdx = -1;
+       let headerMap = {};
+       
+       for (let i = 0; i < lines.length; i++) {
+         const cells = lines[i].split(/[,;\t]/);
+         let matchCount = 0;
+         cells.forEach((cell, colIdx) => {
+           Object.keys(aliases).forEach(key => {
+             if (aliases[key].some(alias => cell.includes(alias))) {
+               headerMap[key] = colIdx;
+               matchCount++;
+             }
+           });
+         });
+         if (matchCount > 3) {
+           headerRowIdx = i;
+           break;
+         }
+       }
+
+       if (headerRowIdx !== -1 && headerRowIdx + 1 < lines.length) {
+          const valueCells = lines[headerRowIdx + 1].split(/[,;\t]/);
+          Object.keys(headerMap).forEach(key => {
+            const colIdx = headerMap[key];
+            if (valueCells[colIdx]) {
+              const numMatch = valueCells[colIdx].match(/[-+]?[0-9]*\.?[0-9]+/);
+              if (numMatch) {
+                extractedData[key] = parseFloat(numMatch[0]);
+                foundAny = true;
+              }
+            }
+          });
+       }
+    }
+    return { data: extractedData, success: foundAny };
+  };
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
+    
     reader.onload = (event) => {
       try {
         const text = event.target.result;
-        const lines = text.split('\n').filter(line => line.trim() !== '');
-        if (lines.length >= 2) {
-          const headers = lines[0].split(',').map(h => h.trim());
-          const values = lines[1].split(',').map(v => parseFloat(v.trim()) || 0);
-          
-          const newFormData = { ...formData };
-          let isValid = false;
+        const result = smartParseCSV(text);
 
-          headers.forEach((header, index) => {
-            if (newFormData[header] !== undefined) {
-              newFormData[header] = values[index];
-              isValid = true;
-            }
-          });
-
-          if (isValid) {
-            setFormData(newFormData);
-            alert(language === 'ar' ? 'تم استيراد البيانات بنجاح!' : 'Data imported successfully!');
-          } else {
-            alert(language === 'ar' ? 'الملف غير مطابق للنموذج.' : 'Invalid file format.');
-          }
+        if (result.success) {
+          setFormData(prev => ({ ...prev, ...result.data }));
+          const matchedCount = Object.keys(result.data).length;
+          alert(language === 'ar' ? `نجاح! تم التعرف على ${matchedCount} عنصراً واستيراد أرقامهم تلقائياً.` : `Success! Recognized ${matchedCount} parameters.`);
+        } else {
+          alert(language === 'ar' ? 'لم يتم العثور على بيانات كيميائية قابلة للقراءة في هذا الملف.' : 'No readable chemical data found in this file.');
         }
       } catch (err) {
-        alert(language === 'ar' ? 'حدث خطأ أثناء قراءة الملف.' : 'Error reading file.');
+        alert(language === 'ar' ? 'حدث خطأ غير متوقع أثناء قراءة الملف.' : 'Error reading file.');
       }
     };
+    
     reader.readAsText(file);
     e.target.value = null; // Reset input
   };
@@ -136,20 +210,17 @@ function App() {
             </h2>
           </div>
 
-          {/* Excel/CSV Import/Export Tools (Hidden on Print) */}
+          {/* AI/Fuzzy CSV Importer (Hidden on Print) */}
           <div className="flex flex-col gap-2 mb-6 p-4 bg-slate-50 border rounded-lg print:hidden">
-            <span className="text-sm font-bold text-slate-600">{isAr ? 'الاستيراد الآلي (Excel / CSV)' : 'Automated Import'}</span>
+            <span className="text-sm font-bold text-slate-600">{isAr ? 'الاستيراد الذكي للنتائج (Excel / CSV)' : 'Smart Lab Data Importer'}</span>
             <div className="flex gap-2">
-              <button onClick={downloadTemplate} className="flex-1 bg-white border border-blue-600 text-blue-700 hover:bg-blue-50 py-2 rounded flex justify-center items-center gap-1 text-sm transition-colors">
-                <Download size={16} /> {isAr ? 'تحميل النموذج' : 'Template'}
-              </button>
-              <label className="flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer py-2 rounded flex justify-center items-center gap-1 text-sm transition-colors">
-                <Upload size={16} /> {isAr ? 'رفع النتائج' : 'Upload CSV'}
-                <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+              <label className="flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer py-2 rounded flex justify-center items-center gap-1 text-sm transition-colors shadow-sm">
+                <Upload size={16} /> {isAr ? 'رفع ملف النتائج' : 'Upload File'}
+                <input type="file" accept=".csv, .txt, .tsv" className="hidden" onChange={handleFileUpload} />
               </label>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
-              {isAr ? 'حمل النموذج، املأه في الإكسيل، ثم احفظه كـ CSV وارفعه هنا.' : 'Download template, fill in Excel, save as CSV, and upload.'}
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+              {isAr ? 'الخوارزمية الذكية ستقرأ الملف العشوائي أفقياً أو رأسياً وتبحث عن أسماء العناصر وتطابقها برمجياً.' : 'Smart algorithm parses horizontal or vertical layouts and auto-maps parameters.'}
             </p>
           </div>
 
