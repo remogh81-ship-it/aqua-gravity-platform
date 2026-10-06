@@ -33,6 +33,8 @@ class WaterSampleInput(BaseModel):
     phosphorous: float
     bod: float
     cod: float
+    algae: float
+    parasites: float
 
 class ComplianceResult(BaseModel):
     is_compliant: bool
@@ -43,6 +45,11 @@ class WQIResult(BaseModel):
     wqi_value: float
     grade: str
     sub_indices: Dict[str, float]
+
+class BiologicalResult(BaseModel):
+    hazard_score: int
+    hazard_level: str
+    recommendation: str
 
 class StabilityResult(BaseModel):
     phs: float
@@ -63,6 +70,7 @@ class TreatmentResult(BaseModel):
 class AssessmentOutput(BaseModel):
     compliance: ComplianceResult
     wqi: WQIResult
+    biological: BiologicalResult
     stability: StabilityResult
     dosage: DosageResult
     treatment_train: TreatmentResult
@@ -76,7 +84,8 @@ DECREE_458 = {
     "sulfate": 250.0, "chloride": 250.0, "fluoride": 0.8, "aluminum": 0.2, "lead": 0.01,
     "free_chlorine_min": 0.5, "free_chlorine_max": 1.5,
     "total_coliform": 0.0, "e_coli": 0.0, "sodium": 200.0,
-    "ammonia": 0.5, "phosphorous": 2.0, "bod": 3.0, "cod": 10.0
+    "ammonia": 0.5, "phosphorous": 2.0, "bod": 3.0, "cod": 10.0,
+    "algae": 0.0, "parasites": 0.0
 }
 
 # ----------------- LOGIC -----------------
@@ -103,6 +112,8 @@ def verify_compliance(s: WaterSampleInput) -> ComplianceResult:
     if s.phosphorous > DECREE_458["phosphorous"]: v.append(f"Phosphorous > {DECREE_458['phosphorous']} mg/L")
     if s.bod > DECREE_458["bod"]: v.append(f"BOD > {DECREE_458['bod']} mg/L (Organic Pollution)")
     if s.cod > DECREE_458["cod"]: v.append(f"COD > {DECREE_458['cod']} mg/L (Chemical Pollution)")
+    if s.algae > DECREE_458["algae"]: v.append("Algae Detected")
+    
     if not (DECREE_458["free_chlorine_min"] <= s.free_chlorine <= DECREE_458["free_chlorine_max"]): v.append("Free Chlorine out of bounds (0.5-1.5 mg/L)")
     
     if s.total_coliform > DECREE_458["total_coliform"]:
@@ -111,8 +122,30 @@ def verify_compliance(s: WaterSampleInput) -> ComplianceResult:
     if s.e_coli > DECREE_458["e_coli"]:
         v.append("E. coli Detected (CRITICAL VETO)")
         veto = True
+    if s.parasites > DECREE_458["parasites"]:
+        v.append("Parasites Detected (CRITICAL VETO)")
+        veto = True
         
     return ComplianceResult(is_compliant=len(v)==0, veto_status="REJECTED" if veto else "PASS", violations=v)
+
+def assess_biological_hazard(s: WaterSampleInput) -> BiologicalResult:
+    score = 0
+    if s.e_coli > 0: score += 50
+    if s.parasites > 0: score += 50
+    if s.total_coliform > 0: score += 30
+    if s.algae > 0: score += 20
+    if s.bod > 5: score += 10
+    
+    score = min(score, 100)
+    
+    if score == 0:
+        return BiologicalResult(hazard_score=0, hazard_level="Safe (Biologically Pure)", recommendation="No additional bio-treatment required.")
+    elif score <= 30:
+        return BiologicalResult(hazard_score=score, hazard_level="Moderate Risk (Contamination)", recommendation="Enhance standard chlorination.")
+    elif score <= 60:
+        return BiologicalResult(hazard_score=score, hazard_level="High Risk (Pathogens/Algae)", recommendation="Advanced filtration (UF/DAF) and rigorous disinfection needed.")
+    else:
+        return BiologicalResult(hazard_score=score, hazard_level="Extreme Hazard (Bio-hazard)", recommendation="CRITICAL: Multi-barrier UV + RO + Chlorine required.")
 
 def calculate_wqi(s: WaterSampleInput) -> WQIResult:
     params = {
@@ -185,13 +218,21 @@ def calc_dosage(s: WaterSampleInput, stab: StabilityResult) -> DosageResult:
 def get_train(s: WaterSampleInput, c: ComplianceResult, st: StabilityResult) -> TreatmentResult:
     stages = ["Intake & Screening"]
     if s.bod > 20 or s.cod > 50 or s.ammonia > 5: stages.append("Biological Treatment (MBBR / AS)")
-    if s.iron > 0.1 or s.manganese > 0.1 or s.turbidity > 5.0: stages.append("Pre-oxidation (Aeration / KMnO4)")
-    if s.turbidity > 1.0 or s.aluminum > 0.1 or s.phosphorous > 2.0: stages.append("Coagulation & Flocculation")
+    if s.algae > 10: stages.append("Dissolved Air Flotation (DAF)")
+    elif s.iron > 0.1 or s.manganese > 0.1 or s.turbidity > 5.0 or s.algae > 0: stages.append("Pre-oxidation (Aeration / KMnO4)")
+    
+    if s.turbidity > 1.0 or s.aluminum > 0.1 or s.phosphorous > 2.0 or s.algae > 0: stages.append("Coagulation & Flocculation")
     stages.append("Clarification & Sand Filtration")
+    
+    if s.parasites > 0: stages.append("Ultrafiltration (UF) / Microfiltration")
     if s.calcium_hardness > 350 or s.tds > 1000 or s.chloride > 250 or s.sulfate > 250 or s.sodium > 200: stages.append("Membrane Filtration (RO)")
     if s.lead > 0.01 or s.cod > 10.0: stages.append("GAC / Specialized Media Adsorption")
     if st.lsi < -0.5: stages.append("Chemical Conditioning (pH Adjustment)")
-    stages.append("Terminal Disinfection (Chlorine / UV)")
+    
+    disinfection = "Terminal Disinfection (Chlorine)"
+    if s.parasites > 0 or s.e_coli > 0: disinfection = "Advanced Disinfection (UV + Chlorine)"
+    stages.append(disinfection)
+    
     return TreatmentResult(stages=stages)
 
 def classify_water_source(s: WaterSampleInput) -> str:
@@ -210,11 +251,11 @@ def classify_water_source(s: WaterSampleInput) -> str:
         return "Domestic Wastewater (مياه صرف صحي)"
         
     # Treated vs Untreated Fresh Water
-    if s.free_chlorine >= 0.1 and s.tds <= 1500 and s.e_coli == 0:
+    if s.free_chlorine >= 0.1 and s.tds <= 1500 and s.e_coli == 0 and s.algae == 0 and s.parasites == 0:
         return "Treated Drinking Water (مياه شرب معالجة)"
         
     # Groundwater characteristics
-    if s.total_hardness > 250 and s.turbidity < 5.0 and s.free_chlorine == 0 and s.bod < 5:
+    if s.total_hardness > 250 and s.turbidity < 5.0 and s.free_chlorine == 0 and s.bod < 5 and s.algae == 0:
         return "Groundwater (مياه جوفية)"
         
     return "Untreated Surface Water (مياه سطحية عذبة غير معالجة)"
@@ -224,8 +265,9 @@ def classify_water_source(s: WaterSampleInput) -> str:
 def assess_water(sample: WaterSampleInput):
     c = verify_compliance(sample)
     w = calculate_wqi(sample)
+    b = assess_biological_hazard(sample)
     st = get_stability(sample)
     d = calc_dosage(sample, st)
     t = get_train(sample, c, st)
     water_type = classify_water_source(sample)
-    return AssessmentOutput(compliance=c, wqi=w, stability=st, dosage=d, treatment_train=t, water_type=water_type)
+    return AssessmentOutput(compliance=c, wqi=w, biological=b, stability=st, dosage=d, treatment_train=t, water_type=water_type)
