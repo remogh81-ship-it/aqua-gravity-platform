@@ -33,7 +33,8 @@ class WaterSampleInput(BaseModel):
     phosphorous: float
     bod: float
     cod: float
-    algae: float
+    total_algae: float
+    blue_green_algae: float
     parasites: float
 
 class ComplianceResult(BaseModel):
@@ -85,7 +86,7 @@ DECREE_458 = {
     "free_chlorine_min": 0.5, "free_chlorine_max": 1.5,
     "total_coliform": 0.0, "e_coli": 0.0, "sodium": 200.0,
     "ammonia": 0.5, "phosphorous": 2.0, "bod": 3.0, "cod": 10.0,
-    "algae": 0.0, "parasites": 0.0
+    "total_algae": 0.0, "blue_green_algae": 0.0, "parasites": 0.0
 }
 
 # ----------------- LOGIC -----------------
@@ -112,7 +113,8 @@ def verify_compliance(s: WaterSampleInput) -> ComplianceResult:
     if s.phosphorous > DECREE_458["phosphorous"]: v.append(f"Phosphorous > {DECREE_458['phosphorous']} mg/L")
     if s.bod > DECREE_458["bod"]: v.append(f"BOD > {DECREE_458['bod']} mg/L (Organic Pollution)")
     if s.cod > DECREE_458["cod"]: v.append(f"COD > {DECREE_458['cod']} mg/L (Chemical Pollution)")
-    if s.algae > DECREE_458["algae"]: v.append("Algae Detected")
+    if s.total_algae > DECREE_458["total_algae"]: v.append("Total Algae Detected")
+    if s.blue_green_algae > DECREE_458["blue_green_algae"]: v.append("Blue-Green Algae Detected (CYANOTOXINS HAZARD)")
     
     if not (DECREE_458["free_chlorine_min"] <= s.free_chlorine <= DECREE_458["free_chlorine_max"]): v.append("Free Chlorine out of bounds (0.5-1.5 mg/L)")
     
@@ -130,10 +132,11 @@ def verify_compliance(s: WaterSampleInput) -> ComplianceResult:
 
 def assess_biological_hazard(s: WaterSampleInput) -> BiologicalResult:
     score = 0
+    if s.blue_green_algae > 0: score += 60  # Highest weight for cyanotoxins
     if s.e_coli > 0: score += 50
     if s.parasites > 0: score += 50
     if s.total_coliform > 0: score += 30
-    if s.algae > 0: score += 20
+    if s.total_algae > 0 and s.blue_green_algae == 0: score += 20
     if s.bod > 5: score += 10
     
     score = min(score, 100)
@@ -145,7 +148,7 @@ def assess_biological_hazard(s: WaterSampleInput) -> BiologicalResult:
     elif score <= 60:
         return BiologicalResult(hazard_score=score, hazard_level="High Risk (Pathogens/Algae)", recommendation="Advanced filtration (UF/DAF) and rigorous disinfection needed.")
     else:
-        return BiologicalResult(hazard_score=score, hazard_level="Extreme Hazard (Bio-hazard)", recommendation="CRITICAL: Multi-barrier UV + RO + Chlorine required.")
+        return BiologicalResult(hazard_score=score, hazard_level="Extreme Hazard (Bio-hazard/Toxins)", recommendation="CRITICAL: PAC/Ozone for Toxins + Multi-barrier UV + RO.")
 
 def calculate_wqi(s: WaterSampleInput) -> WQIResult:
     params = {
@@ -218,19 +221,31 @@ def calc_dosage(s: WaterSampleInput, stab: StabilityResult) -> DosageResult:
 def get_train(s: WaterSampleInput, c: ComplianceResult, st: StabilityResult) -> TreatmentResult:
     stages = ["Intake & Screening"]
     if s.bod > 20 or s.cod > 50 or s.ammonia > 5: stages.append("Biological Treatment (MBBR / AS)")
-    if s.algae > 10: stages.append("Dissolved Air Flotation (DAF)")
-    elif s.iron > 0.1 or s.manganese > 0.1 or s.turbidity > 5.0 or s.algae > 0: stages.append("Pre-oxidation (Aeration / KMnO4)")
     
-    if s.turbidity > 1.0 or s.aluminum > 0.1 or s.phosphorous > 2.0 or s.algae > 0: stages.append("Coagulation & Flocculation")
+    # Specific Cyanobacteria Treatment
+    if s.blue_green_algae > 0:
+        stages.append("Ozonation / PAC Dosing (Cyanotoxins Removal)")
+        stages.append("Dissolved Air Flotation (DAF)")
+    elif s.total_algae > 10:
+        stages.append("Dissolved Air Flotation (DAF)")
+    elif s.iron > 0.1 or s.manganese > 0.1 or s.turbidity > 5.0 or s.total_algae > 0: 
+        stages.append("Pre-oxidation (Aeration / KMnO4)")
+    
+    if s.turbidity > 1.0 or s.aluminum > 0.1 or s.phosphorous > 2.0 or s.total_algae > 0: 
+        stages.append("Coagulation & Flocculation")
+        
     stages.append("Clarification & Sand Filtration")
     
-    if s.parasites > 0: stages.append("Ultrafiltration (UF) / Microfiltration")
-    if s.calcium_hardness > 350 or s.tds > 1000 or s.chloride > 250 or s.sulfate > 250 or s.sodium > 200: stages.append("Membrane Filtration (RO)")
-    if s.lead > 0.01 or s.cod > 10.0: stages.append("GAC / Specialized Media Adsorption")
+    if s.parasites > 0: stages.append("Ultrafiltration (UF)")
+    if s.calcium_hardness > 350 or s.tds > 1000 or s.chloride > 250 or s.sulfate > 250 or s.sodium > 200: 
+        stages.append("Membrane Filtration (RO)")
+    if s.lead > 0.01 or s.cod > 10.0 or s.blue_green_algae > 0: 
+        stages.append("GAC / Specialized Media Adsorption")
     if st.lsi < -0.5: stages.append("Chemical Conditioning (pH Adjustment)")
     
     disinfection = "Terminal Disinfection (Chlorine)"
-    if s.parasites > 0 or s.e_coli > 0: disinfection = "Advanced Disinfection (UV + Chlorine)"
+    if s.parasites > 0 or s.e_coli > 0 or s.blue_green_algae > 0: 
+        disinfection = "Advanced Disinfection (UV + Chlorine)"
     stages.append(disinfection)
     
     return TreatmentResult(stages=stages)
