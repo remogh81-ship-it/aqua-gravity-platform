@@ -196,7 +196,7 @@ function App() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">AquaGravity <span className="font-light">Engineering</span></h1>
               <div className="text-xs font-medium text-amber-300 flex items-center gap-1 mt-1">
-                <ShieldCheck size={12}/> v4.1 - Enterprise Edition
+                <ShieldCheck size={12}/> v4.2 - Enterprise Edition
               </div>
             </div>
           </div>
